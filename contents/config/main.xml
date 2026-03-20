@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0
+      http://www.kde.org/standards/kcfg/1.0/kcfg.xsd" >
+  <kcfgfile name=""/>
+
+  <group name="General">
+    <entry name="showOnlyCurrentScreen" type="Bool">
+      <label>Whether to show only window tasks that are on the same screen as the widget.</label>
+      <default>false</default>
+    </entry>
+    <entry name="showOnlyCurrentDesktop" type="Bool">
+      <label>Whether to only show tasks that are on the current virtual desktop.</label>
+      <default>true</default>
+    </entry>
+    <entry name="showOnlyCurrentActivity" type="Bool">
+      <label>Whether to show only tasks that are on the current activity.</label>
+      <default>true</default>
+    </entry>
+    <entry name="showOnlyMinimized" type="Bool">
+      <label>Whether to show only window tasks that are minimized.</label>
+      <default>false</default>
+    </entry>
+    <entry name="groupingStrategy" type="Enum">
+      <label>How tasks are grouped: 0 = Do Not Group, 1 = By Program Name</label>
+      <default>1</default>
+    </entry>
+    <entry name="groupingAppIdBlacklist" type="StringList">
+      <label>The id's of applications that should not have their tasks grouped.</label>
+      <default></default>
+    </entry>
+    <entry name="groupingLauncherUrlBlacklist" type="StringList">
+      <label>The launcher URLs of applications that should not have their tasks grouped.</label>
+      <default></default>
+    </entry>
+    <entry name="sortingStrategy" type="Int">
+      <label>Values from TaskManager::TasksModel::SortMode</label>
+      <default>1</default>
+    </entry>
+    <entry name="separateLaunchers" type="Bool">
+      <label>Whether launcher tasks are sorted separately at the left side.</label>
+      <default>true</default>
+    </entry>
+    <entry name="launchers" type="StringList">
+      <label>The list of launcher tasks on the widget.</label>
+      <default>applications:systemsettings.desktop,applications:org.kde.discover.desktop,preferred://filemanager,preferred://browser</default>
+    </entry>
+    <entry name="middleClickAction" type="Enum">
+      <label>What to do on middle-mouse click on a task button.</label>
+      <choices>
+            <choice name="None"/>
+            <choice name="Close"/>
+            <choice name="NewInstance"/>
+            <choice name="ToggleMinimized"/>
+            <choice name="ToggleGrouping"/>
+            <choice name="BringToCurrentDesktop"/>
+      </choices>
+      <default>2</default>
+    </entry>
+    <entry name="fill" type="Bool">
+      <label>Whether task manager should occupy all available space.</label>
+      <default>true</default>
+    </entry>
+    <entry name="iconSpacing" type="Int">
+      <label>Spacing between icons in task manager.</label>
+      <default>10</default>
+    </entry>
+
+    <!-- Zoom Animation Settings -->
+    <entry name="zoomEnabled" type="Bool">
+      <label>Whether to enable zoom animation on hover.</label>
+      <default>true</default>
+    </entry>
+    <entry name="zoomFactor" type="Double">
+      <label>The zoom factor when hovering (1.0-1.24 range, UI shows 1-10).</label>
+      <default>1.24</default>
+    </entry>
+    <entry name="zoomDuration" type="Int">
+      <label>Duration of zoom animation in milliseconds.</label>
+      <default>175</default>
+    </entry>
+    <entry name="zoomNeighbors" type="Bool">
+      <label>Whether to also zoom neighboring icons (dock-like effect).</label>
+      <default>true</default>
+    </entry>
+    <entry name="neighborZoomFactor" type="Double">
+      <label>The zoom factor for neighboring icons (1.0-1.24 range).</label>
+      <default>1.10</default>
+    </entry>
+    <entry name="parabolicEnabled" type="Bool">
+      <label>Whether to enable parabolic dock effect (icons rise up on hover like macOS).</label>
+      <default>true</default>
+    </entry>
+    <entry name="maxParabolicRise" type="Int">
+      <label>Maximum rise height in pixels for parabolic effect.</label>
+      <default>12</default>
+    </entry>
+  </group>
+
+</kcfg>
