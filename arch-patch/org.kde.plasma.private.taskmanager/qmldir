@@ -1,0 +1,8 @@
+module org.kde.plasma.private.taskmanager
+linktarget taskmanagerplugin
+optional plugin taskmanagerplugin
+classname org_kde_plasma_private_taskmanagerPlugin
+typeinfo taskmanagerplugin.qmltypes
+prefer :/qt/qml/org/kde/plasma/private/taskmanager/
+depends QtQuick
+
