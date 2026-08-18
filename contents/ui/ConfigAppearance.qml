@@ -12,14 +12,16 @@ import org.kde.kcmutils as KCM
 
 KCM.SimpleKCM {
     property alias cfg_zoomEnabled: zoomEnabledCheck.checked
-    property real cfg_zoomFactor: 1.5
+    property real cfg_zoomFactor: 1.1866666666666665
     property alias cfg_zoomDuration: zoomDurationSlider.value
     property alias cfg_zoomNeighbors: zoomNeighborsCheck.checked
-    property real cfg_neighborZoomFactor: 1.2
+    property real cfg_neighborZoomFactor: 1.1066666666666667
     property alias cfg_parabolicEnabled: parabolicEnabledCheck.checked
     property alias cfg_maxParabolicRise: parabolicRiseSlider.value
     property alias cfg_iconSpacing: iconSpacingSlider.value
     property alias cfg_fill: fillCheck.checked
+    property alias cfg_antiClip: antiClipCheck.checked
+    property alias cfg_iconSizePercent: iconSizePercentSlider.value
 
     // Convert between UI scale (1-10) and real zoom factor (1.0-1.24)
     // UI 1 = 1.0x (no zoom), UI 10 = 1.24x (max zoom without clipping)
@@ -129,7 +131,7 @@ KCM.SimpleKCM {
             id: parabolicRiseSlider
             Kirigami.FormData.label: i18n("Rise height:")
             from: 0
-            to: 12
+            to: antiClipCheck.checked ? 18 : 12
             stepSize: 1
             enabled: zoomEnabledCheck.checked && parabolicEnabledCheck.checked
         }
@@ -165,6 +167,27 @@ KCM.SimpleKCM {
             id: fillCheck
             Kirigami.FormData.label: i18n("Fill available space:")
             text: i18n("Task manager occupies all available space")
+        }
+
+        QQC2.CheckBox {
+            id: antiClipCheck
+            Kirigami.FormData.label: i18n("Anti-clip:")
+            text: i18n("Reduce icon size by 10% to prevent clipping")
+        }
+
+        QQC2.Slider {
+            id: iconSizePercentSlider
+            Kirigami.FormData.label: i18n("Icon size:")
+            from: 50
+            to: 100
+            stepSize: 5
+        }
+
+        RowLayout {
+            Kirigami.FormData.label: i18n("Icon size:")
+            QQC2.Label {
+                text: iconSizePercentSlider.value + "%"
+            }
         }
     }
 }

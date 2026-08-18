@@ -61,23 +61,9 @@ QtObject {
     function streamsForPid(pid: int): /*[QtObject]*/ var {
         // skip stream that has portalAppId
         // app using portal may have a sandbox pid
-        const streams = findStreamsFn(stream => stream.pid === pid && !stream.portalAppId);
-
-        if (streams.length === 0) {
-            for (let i = 0, length = instantiator.count; i < length; ++i) {
-                const stream = instantiator.objectAt(i);
-
-                if (stream.parentPid === -1) {
-                    stream.parentPid = backend.parentPid(stream.pid);
-                }
-
-                if (stream.parentPid === pid) {
-                    streams.push(stream);
-                }
-            }
-        }
-
-        return streams;
+        // Match by pid only. parentPid() lived on the private C++ Backend
+        // and is unavailable without the Arch/Fedora binary patch.
+        return findStreamsFn(stream => stream.pid === pid && !stream.portalAppId);
     }
 
     // QtObject has no default property, hence adding the Instantiator to one explicitly.
@@ -91,8 +77,6 @@ QtObject {
             id: delegate
             required property var model
             readonly property int pid: model.Client?.properties["application.process.id"] ?? 0
-            // Determined on demand.
-            property int parentPid: -1
             readonly property string appName: model.Client?.properties["application.name"] ?? ""
             readonly property string portalAppId: model.Client?.properties["pipewire.access.portal.app_id"] ?? ""
             readonly property bool muted: model.Muted

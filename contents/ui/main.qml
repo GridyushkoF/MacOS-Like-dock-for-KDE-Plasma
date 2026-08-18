@@ -12,7 +12,6 @@ import org.kde.plasma.core as PlasmaCore
 import org.kde.kirigami as Kirigami
 
 import org.kde.taskmanager as TaskManager
-import org.kde.plasma.private.taskmanager as TaskManagerApplet
 import org.kde.plasma.private.mpris as Mpris
 
 PlasmoidItem {
@@ -30,6 +29,16 @@ PlasmoidItem {
     readonly property real neighborZoomFactor: Plasmoid.configuration.neighborZoomFactor
     readonly property bool parabolicEnabled: Plasmoid.configuration.parabolicEnabled
     readonly property int maxParabolicRise: Plasmoid.configuration.maxParabolicRise
+
+    // Audio properties from config
+    readonly property bool showAudioIndicator: Plasmoid.configuration.showAudioIndicator
+    readonly property bool allowVolumeControl: Plasmoid.configuration.allowVolumeControl
+
+    // Anti-clip property
+    readonly property bool antiClip: Plasmoid.configuration.antiClip
+
+    // Icon size normalization
+    readonly property int iconSizePercent: Plasmoid.configuration.iconSizePercent
 
     preferredRepresentation: fullRepresentation
 
@@ -87,6 +96,11 @@ PlasmoidItem {
     // PulseAudio for volume control
     PulseAudio {
         id: pulseAudio
+    }
+
+    LauncherDrop {
+        id: launcherDrop
+        tasksModel: tasksModel
     }
 
     // TaskManager Model
@@ -156,14 +170,6 @@ PlasmoidItem {
         }
     }
 
-    TaskManagerApplet.Backend {
-        id: backend
-
-        onAddLauncher: url => {
-            tasksModel.requestAddLauncher(url);
-        }
-    }
-
     TaskManager.VirtualDesktopInfo {
         id: virtualDesktopInfo
     }
@@ -182,6 +188,26 @@ PlasmoidItem {
             onHoveredChanged: {
                 if (!hovered) {
                     taskList.forceResetHover();
+                }
+            }
+        }
+
+        // Empty dock / gutter: pin the default app (or the .desktop app itself)
+        DropArea {
+            id: launcherDropArea
+            anchors.fill: parent
+            z: 0  // Below task icons
+
+            onEntered: function(drag) {
+                if (drag.hasUrls) {
+                    drag.accepted = true;
+                }
+            }
+
+            onDropped: function(drop) {
+                if (drop.hasUrls) {
+                    launcherDrop.addFromUrls(drop.urls);
+                    drop.accepted = true;
                 }
             }
         }
@@ -206,12 +232,21 @@ PlasmoidItem {
             zoomFactor: root.zoomFactor
             zoomDuration: root.zoomDuration
             pulseAudio: pulseAudio
+            showAudioIndicator: root.showAudioIndicator
+            allowVolumeControl: root.allowVolumeControl
             zoomNeighbors: root.zoomNeighbors
             neighborZoomFactor: root.neighborZoomFactor
             iconSpacing: Plasmoid.configuration.iconSpacing
             widgetHovered: widgetHoverHandler.hovered
             parabolicEnabled: root.parabolicEnabled
             maxParabolicRise: root.maxParabolicRise
+            shrinkDistant: false
+            distantShrinkFactor: 1.0
+            antiClip: root.antiClip
+            iconSizePercent: root.iconSizePercent
+            autoShrink: false
+            minIconSize: 24
+            availableSpace: root.vertical ? root.height : root.width
 
             onTaskClicked: function(index, button, modifiers) {
                 var modelIndex = tasksModel.makeModelIndex(index);
@@ -224,8 +259,8 @@ PlasmoidItem {
                     if (modifiers & Qt.ShiftModifier) {
                         tasksModel.requestNewInstance(modelIndex);
                     } else if (isGroupParent) {
-                        // Show group popup with list of windows
-                        root.showGroupDialog(index);
+                        // Cycle through group windows on click
+                        root.cycleGroupWindows(index);
                     } else if (isLauncher) {
                         tasksModel.requestActivate(modelIndex);
                     } else if (isActive) {
@@ -253,6 +288,10 @@ PlasmoidItem {
                 }
             }
 
+            onTaskLauncherDropped: function(urls) {
+                launcherDrop.addFromUrls(urls);
+            }
+
             onTaskFilesDropped: function(index, urls) {
                 var modelIndex = tasksModel.makeModelIndex(index);
                 var isLauncher = tasksModel.data(modelIndex, TaskManager.AbstractTasksModel.IsLauncher);
@@ -263,14 +302,51 @@ PlasmoidItem {
                         tasksModel.requestActivate(modelIndex);
                     }
                 } else {
-                    // Files were dropped - open them with this app
-                    if (isLauncher) {
-                        // For launchers, open the app with the files
-                        tasksModel.requestOpenUrls(modelIndex, urls);
+                    tasksModel.requestOpenUrls(modelIndex, urls);
+                }
+            }
+
+            onTaskDragHover: function(index, isDragHovered) {
+                var modelIndex = tasksModel.makeModelIndex(index);
+                var isGroupParent = tasksModel.data(modelIndex, TaskManager.AbstractTasksModel.IsGroupParent);
+
+                if (isDragHovered && isGroupParent) {
+                    // Show group dialog immediately for drag-n-drop
+                    root.showGroupDialog(index);
+                }
+            }
+
+        }
+
+        // Watch hoveredIndex changes for group preview
+        Connections {
+            target: taskList
+            function onHoveredIndexChanged() {
+                var index = taskList.hoveredIndex;
+                if (index >= 0) {
+                    var modelIndex = tasksModel.makeModelIndex(index);
+                    var isGroupParent = tasksModel.data(modelIndex, TaskManager.AbstractTasksModel.IsGroupParent);
+                    if (isGroupParent) {
+                        groupHoverTimer.taskIndex = index;
+                        groupHoverTimer.start();
                     } else {
-                        // For running apps, also use requestOpenUrls
-                        tasksModel.requestOpenUrls(modelIndex, urls);
+                        groupHoverTimer.stop();
                     }
+                } else {
+                    groupHoverTimer.stop();
+                }
+            }
+        }
+
+        // Timer for delayed group preview (to avoid flickering)
+        Timer {
+            id: groupHoverTimer
+            property int taskIndex: -1
+            interval: 400
+            onTriggered: {
+                // Check if still hovering same task
+                if (taskIndex >= 0 && taskList.hoveredIndex === taskIndex) {
+                    root.showGroupDialog(taskIndex);
                 }
             }
         }
@@ -291,6 +367,27 @@ PlasmoidItem {
         }
     }
 
+    function cycleGroupWindows(index) {
+        var modelIndex = tasksModel.makeModelIndex(index);
+        var childCount = tasksModel.rowCount(modelIndex);
+        if (childCount === 0) return;
+
+        // Find the currently active window in the group
+        var activeChildIndex = -1;
+        for (var i = 0; i < childCount; i++) {
+            var childIndex = tasksModel.index(i, 0, modelIndex);
+            if (tasksModel.data(childIndex, TaskManager.AbstractTasksModel.IsActive)) {
+                activeChildIndex = i;
+                break;
+            }
+        }
+
+        // Activate the next window in the group (cycle)
+        var nextIndex = (activeChildIndex + 1) % childCount;
+        var nextChildIndex = tasksModel.index(nextIndex, 0, modelIndex);
+        tasksModel.requestActivate(nextChildIndex);
+    }
+
     function createContextMenu(task, modelIndex, args = {}) {
         if (contextMenuComponent.status !== Component.Ready) {
             console.log("ContextMenu component error:", contextMenuComponent.errorString());
@@ -300,7 +397,6 @@ PlasmoidItem {
             visualParent: task,
             modelIndex: modelIndex,
             mpris2Source: mpris2Source,
-            backend: backend,
             tasksModel: tasksModel,
             virtualDesktopInfo: virtualDesktopInfo,
             activityInfo: activityInfo,

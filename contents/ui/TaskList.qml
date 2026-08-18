@@ -23,9 +23,20 @@ Item {
     property bool widgetHovered: false
     property bool parabolicEnabled: true
     property int maxParabolicRise: 12
+    property bool shrinkDistant: false
+    property real distantShrinkFactor: 0.8
+    property bool antiClip: false
+    property int iconSizePercent: 100
+
+    // Auto-shrink properties
+    property bool autoShrink: true
+    property int minIconSize: 24
+    property int availableSpace: 0  // Available space for icons (width for horizontal, height for vertical)
 
     // Audio
     property var pulseAudio: null
+    property bool showAudioIndicator: false
+    property bool allowVolumeControl: false
 
     property int hoveredIndex: -1
 
@@ -121,19 +132,85 @@ Item {
     signal taskClicked(int index, int button, int modifiers)
     signal taskContextMenu(int index)
     signal taskFilesDropped(int index, var urls)
+    signal taskLauncherDropped(var urls)
+    signal taskDragHover(int index, bool isDragHovered)
 
     function getTaskAt(index) {
         return taskRepeater.itemAt(index);
     }
 
-    readonly property int effectiveIconSize: Math.max(panelThickness - Kirigami.Units.smallSpacing * 4, Kirigami.Units.iconSizes.medium)
+    // Counter that increments on model changes to force rebinding
+    property int modelUpdateCounter: 0
+
+    function getGroupChildCount(taskIndex) {
+        // Reference counter to trigger updates
+        var _ = modelUpdateCounter;
+        var idx = model.makeModelIndex(taskIndex);
+        return model.rowCount(idx);
+    }
+
+    function getActiveChildIndex(taskIndex) {
+        // Reference counter to trigger updates
+        var _ = modelUpdateCounter;
+        var parentIdx = model.makeModelIndex(taskIndex);
+        var count = model.rowCount(parentIdx);
+        for (var i = 0; i < count; i++) {
+            var childIdx = model.index(i, 0, parentIdx);
+            if (model.data(childIdx, TaskManager.AbstractTasksModel.IsActive)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    // Update counter when model data changes
+    Connections {
+        target: taskListRoot.model
+        function onDataChanged() {
+            taskListRoot.modelUpdateCounter++;
+        }
+    }
+
+    readonly property int baseIconSize: Math.max(panelThickness - Kirigami.Units.smallSpacing * 4, Kirigami.Units.iconSizes.medium)
+    readonly property int preAntiClipSize: antiClip ? Math.round(baseIconSize * 0.9) : baseIconSize
     readonly property int itemSpacing: Kirigami.Units.smallSpacing * iconSpacing
+
+    // Auto-shrink calculation
+    readonly property int effectiveIconSize: {
+        // Skip auto-shrink if disabled or invalid state
+        if (!autoShrink || taskRepeater.count === 0) {
+            return preAntiClipSize;
+        }
+
+        // Need reasonable available space (at least space for one icon at min size)
+        if (availableSpace < minIconSize) {
+            return preAntiClipSize;
+        }
+
+        // Calculate how much space icons would take at base size
+        var totalSpacing = Math.max(0, taskRepeater.count - 1) * itemSpacing;
+        var neededSpace = taskRepeater.count * preAntiClipSize + totalSpacing;
+
+        // If they fit, use normal size
+        if (neededSpace <= availableSpace) {
+            return preAntiClipSize;
+        }
+
+        // Calculate shrunk size
+        var shrunkSize = Math.floor((availableSpace - totalSpacing) / taskRepeater.count);
+
+        // Clamp to minimum
+        return Math.max(minIconSize, shrunkSize);
+    }
 
     // Fixed implicit size based on item count - completely static
     readonly property int contentSize: taskRepeater.count * effectiveIconSize + Math.max(0, taskRepeater.count - 1) * itemSpacing
+    // Extra strip after the last icon so a file can be dropped onto the dock
+    // itself (pin default app) instead of onto an existing icon (open with).
+    readonly property int launcherDropGutter: Kirigami.Units.gridUnit
 
-    implicitWidth: vertical ? panelThickness : contentSize
-    implicitHeight: vertical ? contentSize : panelThickness
+    implicitWidth: vertical ? panelThickness : contentSize + launcherDropGutter
+    implicitHeight: vertical ? contentSize + launcherDropGutter : panelThickness
 
     // Volume popup dialog
     property var volumeDialog: null
@@ -202,14 +279,27 @@ Item {
                 isDemandingAttention: model.IsDemandingAttention || false
                 isGroupParent: model.IsGroupParent || false
 
+                // Group properties - use function to force recalculation (depend on modelUpdateCounter)
+                groupChildCount: {
+                    var _ = taskListRoot.modelUpdateCounter;
+                    return isGroupParent ? taskListRoot.getGroupChildCount(index) : 0;
+                }
+                activeChildIndex: {
+                    var _ = taskListRoot.modelUpdateCounter;
+                    return isGroupParent ? taskListRoot.getActiveChildIndex(index) : -1;
+                }
+
                 // Audio properties
                 maxVolume: taskListRoot.pulseAudio ? taskListRoot.pulseAudio.normalVolume : 65536
                 volumeStep: Math.round(maxVolume * 0.05)  // 5% per scroll step
+                showAudioIndicator: taskListRoot.showAudioIndicator
+                allowVolumeControl: taskListRoot.allowVolumeControl
 
                 // Audio streams for this task
                 audioStreams: taskListRoot.audioStreamsForTask(index)
 
                 baseSize: taskListRoot.effectiveIconSize
+                iconSizePercent: taskListRoot.iconSizePercent
                 zoomEnabled: taskListRoot.zoomEnabled
                 maxZoomFactor: taskListRoot.zoomFactor
                 zoomDuration: taskListRoot.zoomDuration
@@ -241,6 +331,8 @@ Item {
                     var maxZoom = taskListRoot.zoomFactor;
                     var borderZoom = taskListRoot.zoomNeighbors ? taskListRoot.neighborZoomFactor : 1.0;
                     var maxDist = taskListRoot.zoomNeighbors ? 2.5 : 0.5;
+                    var minZoom = taskListRoot.shrinkDistant ? taskListRoot.distantShrinkFactor : 1.0;
+                    var farDist = maxDist + 2.0;  // Distance at which icons reach minimum size
 
                     if (normalizedDistance <= 0.5) {
                         // Inside main icon: smooth from maxZoom to borderZoom
@@ -250,9 +342,13 @@ Item {
                         // Neighbor icons: smooth from borderZoom to 1.0
                         var t = smoothstep(0.5, maxDist, normalizedDistance);
                         return borderZoom + (1.0 - borderZoom) * t;
+                    } else if (taskListRoot.shrinkDistant && normalizedDistance <= farDist) {
+                        // Distant icons: smooth from 1.0 to minZoom
+                        var t = smoothstep(maxDist, farDist, normalizedDistance);
+                        return 1.0 + (minZoom - 1.0) * t;
                     }
 
-                    return 1.0;
+                    return minZoom;
                 }
 
                 targetRise: {
@@ -278,8 +374,8 @@ Item {
                     return 0;
                 }
 
-                onHoveredChanged: {
-                    if (hovered) {
+                onHoverChanged: function(isHovered) {
+                    if (isHovered) {
                         taskListRoot.mouseMovedRecently = true;
                         activityTimer.restart();
                         taskListRoot.hoveredIndex = index;
@@ -344,6 +440,14 @@ Item {
 
                 onFilesDropped: function(urls) {
                     taskListRoot.taskFilesDropped(index, urls);
+                }
+
+                onLauncherDropped: function(urls) {
+                    taskListRoot.taskLauncherDropped(urls);
+                }
+
+                onDragHoverChanged: function(isDragHovered) {
+                    taskListRoot.taskDragHover(index, isDragHovered);
                 }
             }
         }

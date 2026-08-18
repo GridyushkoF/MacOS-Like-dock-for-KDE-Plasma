@@ -1,15 +1,18 @@
-Download it on https://store.kde.org/p/2352806!
+# Icons-Only Task Manager 2
 
-## Arch-based Systems (CachyOS, EndeavourOS, Manjaro)
+macOS-like icon dock for Plasma 6: zoom on hover, parabolic rise, pin launchers.
 
-If you get the error:
-```
-module "org.kde.plasma.private.taskmanager" is not installed
-```
+https://store.kde.org/p/2352806/
 
-Check the `arch-patch` folder for the fix. Run:
-```bash
-cd arch-patch
-sudo ./install-taskmanager-module.sh
-kquitapp6 plasmashell && kstart plasmashell
-```
+## 1.3
+
+- Works on Plasma 6.7 / CachyOS / Arch **without** the Fedora `arch-patch` binary.
+  The widget no longer imports `org.kde.plasma.private.taskmanager`.
+- Drop a `.desktop` onto the dock to pin that app.
+- Drop a regular file onto the empty strip after the last icon to pin the
+  default application for that file type.
+- Drop a file onto an existing icon to open it with that app.
+- Drop highlight no longer clips against the panel.
+
+Context menu no longer has Jump Lists / Recent Files / Places (those needed
+the private C++ plugin). Mute, MPRIS, pin/unpin, desktops still work.

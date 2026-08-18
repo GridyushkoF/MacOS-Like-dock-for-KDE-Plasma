@@ -19,6 +19,8 @@ KCM.SimpleKCM {
     property alias cfg_sortingStrategy: sortingStrategyCombo.currentIndex
     property alias cfg_separateLaunchers: separateLaunchersCheck.checked
     property alias cfg_middleClickAction: middleClickActionCombo.currentIndex
+    property alias cfg_showAudioIndicator: showAudioIndicatorCheck.checked
+    property alias cfg_allowVolumeControl: allowVolumeControlCheck.checked
 
     Kirigami.FormLayout {
         anchors.left: parent.left
@@ -95,6 +97,23 @@ KCM.SimpleKCM {
                 i18n("Toggle grouping"),
                 i18n("Bring to current desktop")
             ]
+        }
+
+        Kirigami.Separator {
+            Kirigami.FormData.isSection: true
+            Kirigami.FormData.label: i18n("Audio")
+        }
+
+        QQC2.CheckBox {
+            id: showAudioIndicatorCheck
+            Kirigami.FormData.label: i18n("Audio indicator:")
+            text: i18n("Show indicator on tasks playing audio")
+        }
+
+        QQC2.CheckBox {
+            id: allowVolumeControlCheck
+            text: i18n("Allow volume control via mouse wheel")
+            enabled: showAudioIndicatorCheck.checked
         }
 
     }

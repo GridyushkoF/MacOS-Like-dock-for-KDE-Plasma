@@ -24,7 +24,7 @@
     </entry>
     <entry name="groupingStrategy" type="Enum">
       <label>How tasks are grouped: 0 = Do Not Group, 1 = By Program Name</label>
-      <default>1</default>
+      <default>0</default>
     </entry>
     <entry name="groupingAppIdBlacklist" type="StringList">
       <label>The id's of applications that should not have their tasks grouped.</label>
@@ -44,7 +44,7 @@
     </entry>
     <entry name="launchers" type="StringList">
       <label>The list of launcher tasks on the widget.</label>
-      <default>applications:systemsettings.desktop,applications:org.kde.discover.desktop,preferred://filemanager,preferred://browser</default>
+      <default></default>
     </entry>
     <entry name="middleClickAction" type="Enum">
       <label>What to do on middle-mouse click on a task button.</label>
@@ -64,7 +64,7 @@
     </entry>
     <entry name="iconSpacing" type="Int">
       <label>Spacing between icons in task manager.</label>
-      <default>10</default>
+      <default>3</default>
     </entry>
 
     <!-- Zoom Animation Settings -->
@@ -74,7 +74,7 @@
     </entry>
     <entry name="zoomFactor" type="Double">
       <label>The zoom factor when hovering (1.0-1.24 range, UI shows 1-10).</label>
-      <default>1.24</default>
+      <default>1.1866666666666665</default>
     </entry>
     <entry name="zoomDuration" type="Int">
       <label>Duration of zoom animation in milliseconds.</label>
@@ -86,7 +86,7 @@
     </entry>
     <entry name="neighborZoomFactor" type="Double">
       <label>The zoom factor for neighboring icons (1.0-1.24 range).</label>
-      <default>1.10</default>
+      <default>1.1066666666666667</default>
     </entry>
     <entry name="parabolicEnabled" type="Bool">
       <label>Whether to enable parabolic dock effect (icons rise up on hover like macOS).</label>
@@ -94,7 +94,29 @@
     </entry>
     <entry name="maxParabolicRise" type="Int">
       <label>Maximum rise height in pixels for parabolic effect.</label>
-      <default>12</default>
+      <default>18</default>
+    </entry>
+
+    <!-- Anti-clip Setting -->
+    <entry name="antiClip" type="Bool">
+      <label>Whether to reduce icon size by 10% to prevent clipping during zoom.</label>
+      <default>true</default>
+    </entry>
+
+    <!-- Icon size normalization -->
+    <entry name="iconSizePercent" type="Int">
+      <label>Icon size as percentage of cell size (50-100). Reduces oversized icons.</label>
+      <default>100</default>
+    </entry>
+
+    <!-- Audio Settings -->
+    <entry name="showAudioIndicator" type="Bool">
+      <label>Whether to show audio indicator on tasks playing audio.</label>
+      <default>true</default>
+    </entry>
+    <entry name="allowVolumeControl" type="Bool">
+      <label>Whether to allow volume control via mouse wheel.</label>
+      <default>true</default>
     </entry>
   </group>
 

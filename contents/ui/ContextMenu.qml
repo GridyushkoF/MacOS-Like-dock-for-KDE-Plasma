@@ -14,14 +14,10 @@ import org.kde.plasma.extras as PlasmaExtras
 
 import org.kde.taskmanager as TaskManager
 import org.kde.plasma.private.mpris as Mpris
-import org.kde.plasma.private.taskmanager as TaskManagerApplet
-
-import "code/layoutmetrics.js" as LayoutMetrics
 
 PlasmaExtras.Menu {
     id: menu
 
-    required property var backend
     required property var mpris2Source
     required property var modelIndex
     required property var tasksModel
@@ -29,8 +25,6 @@ PlasmaExtras.Menu {
     required property var activityInfo
 
     readonly property var atm: TaskManager.AbstractTasksModel
-
-    property bool showAllPlaces: false
 
     placement: {
         if (Plasmoid.location === PlasmaCore.Types.LeftEdge) {
@@ -53,19 +47,6 @@ PlasmaExtras.Menu {
         } else if (status === PlasmaExtras.Menu.Closed) {
             menu.destroy();
         }
-    }
-
-    Component.onCompleted: {
-        // Cannot have "Connections" as child of PlasmaExtras.Menu.
-        backend.showAllPlaces.connect(showContextMenuWithAllPlaces);
-    }
-
-    Component.onDestruction: {
-        backend.showAllPlaces.disconnect(showContextMenuWithAllPlaces);
-    }
-
-    function showContextMenuWithAllPlaces(): void {
-        visualParent.showContextMenu({showAllPlaces: true});
     }
 
     function get(modelProp: int): var {
@@ -96,68 +77,8 @@ PlasmaExtras.Menu {
     }
 
     function loadDynamicLaunchActions(launcherUrl: url): void {
-        let sections = [];
-
-        const placesActions = backend.placesActions(launcherUrl, showAllPlaces, menu);
-
-        if (placesActions.length > 0) {
-            sections.push({
-                title: i18n("Places"),
-                group: "places",
-                actions: placesActions
-            });
-        } else {
-            sections.push({
-                title:   i18n("Recent Files"),
-                group:   "recents",
-                actions: backend.recentDocumentActions(launcherUrl, menu)
-            });
-        }
-
-        // We always have actions category.
-        sections = sections.filter(section => section.actions.length > 0);
-
-        sections.push({
-            title: i18n("Actions"),
-            group: "actions",
-            actions: backend.jumpListActions(launcherUrl, menu)
-        });
-
-        // C++ can override section heading by returning a QString as first action
-        sections.forEach((section) => {
-            if (typeof section.actions[0] === "string") {
-                section.title = section.actions.shift(); // take first
-            }
-        });
-
-        // QMenu does not limit its width automatically. Even if we set a maximumWidth
-        // it would just cut off text rather than eliding. So we do this manually.
-        const textMetrics = Qt.createQmlObject("import QtQuick; TextMetrics {}", menu);
-        textMetrics.elide = Qt.ElideRight;
-        textMetrics.elideWidth = LayoutMetrics.maximumContextMenuTextWidth();
-
-        sections.forEach(section => {
-            if (section["actions"].length > 0 || section["group"] === "actions") {
-                // Don't add the "Actions" header if the menu has nothing but actions
-                // in it, because then it's redundant (all menus have actions)
-                if (section.group !== "actions" || sections.length > 1) {
-                    var sectionHeader = newMenuItem(menu);
-                    sectionHeader.text = section["title"];
-                    sectionHeader.section = true;
-                    menu.addMenuItem(sectionHeader, startNewInstanceItem);
-                }
-            }
-
-            for (var i = 0; i < section["actions"].length; ++i) {
-                var item = newMenuItem(menu);
-                item.action = section["actions"][i];
-
-                textMetrics.text = item.action.text.replace("&", "&&");
-                item.action.text = textMetrics.elidedText;
-
-                menu.addMenuItem(item, startNewInstanceItem);
-            }
-        });
+        // Jump lists / recent files / places used to come from the private
+        // C++ Backend. Without that plugin we only keep MPRIS + mute.
 
         // Add Media Player control actions
         const playerData = mpris2Source.playerForLauncherUrl(launcherUrl, get(atm.AppPid));
@@ -342,7 +263,6 @@ PlasmaExtras.Menu {
                 menuItem.clicked.connect(() => {
                     tasksModel.requestVirtualDesktops(menu.modelIndex, []);
                 });
-                backend.setActionGroup(menuItem.action);
 
                 menu.newSeparator(virtualDesktopsMenu);
 
@@ -356,7 +276,6 @@ PlasmaExtras.Menu {
                     menuItem.clicked.connect((i => {
                         return () => tasksModel.requestVirtualDesktops(menu.modelIndex, [virtualDesktopInfo.desktopIds[i]]);
                     })(i));
-                    backend.setActionGroup(menuItem.action);
                 }
 
                 menu.newSeparator(virtualDesktopsMenu);
