@@ -212,13 +212,22 @@ PlasmoidItem {
             }
         }
 
+        DockMask {
+            id: dockMask
+            dock: taskList
+            rowLength: taskList.restLength
+            leadingGrowth: taskList.maskLeadingGrowth
+            trailingGrowth: taskList.maskTrailingGrowth
+            vertical: root.vertical
+            keepBackground: Plasmoid.configuration.keepPanelBackground
+        }
+
         TaskList {
             id: taskList
-            // Fixed positioning - no centerIn to avoid recalculation on hover
-            anchors.left: root.vertical ? undefined : parent.left
-            anchors.top: root.vertical ? parent.top : undefined
-            anchors.verticalCenter: root.vertical ? undefined : parent.verticalCenter
-            anchors.horizontalCenter: root.vertical ? parent.horizontalCenter : undefined
+            // Centered only when masking its own region
+            // Not anchors: left and horizontalCenter at once while switching drops the width binding
+            x: root.vertical || dockMask.isActive ? Math.round((parent.width - width) / 2) : 0
+            y: !root.vertical || dockMask.isActive ? Math.round((parent.height - height) / 2) : 0
 
             // Pass the actual panel size to TaskList
             width: root.vertical ? parent.width : implicitWidth
@@ -235,6 +244,7 @@ PlasmoidItem {
             showAudioIndicator: root.showAudioIndicator
             allowVolumeControl: root.allowVolumeControl
             zoomNeighbors: root.zoomNeighbors
+            growOnMagnifiedSide: Plasmoid.configuration.growOnMagnifiedSide
             neighborZoomFactor: root.neighborZoomFactor
             iconSpacing: Plasmoid.configuration.iconSpacing
             widgetHovered: widgetHoverHandler.hovered

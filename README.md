@@ -16,3 +16,17 @@ https://store.kde.org/p/2352806/
 
 Context menu no longer has Jump Lists / Recent Files / Places (those needed
 the private C++ plugin). Mute, MPRIS, pin/unpin, desktops still work.
+
+## Building
+
+The optional C++ plugin in `dockregion` is for pairing the dock with a
+compositor effect such as KDE-Blur. With `Keep the panel background and shadow`
+unticked, it masks the panel to the dock's region and hides Plasma's own
+background, so the effect can draw the dock's background instead. Without the
+plugin, the dock uses the regular panel background. Installing the plugin also
+installs the plasmoid.
+
+    cmake -B dockregion/build -S dockregion -DCMAKE_INSTALL_PREFIX=/usr
+    cmake --build dockregion/build
+    sudo cmake --install dockregion/build
+    systemctl --user restart plasma-plasmashell

@@ -91,43 +91,15 @@ Item {
     property int baseSize: 48
     property bool zoomEnabled: true
     property real maxZoomFactor: 1.24  // Max 1.24 to avoid clipping on floating panels
-    property real targetZoom: 1.0
     property int zoomDuration: 120
-    property bool isTransitioning: false  // True when mouse is in task area (use faster animation)
 
     // Parabolic rise properties
     property bool parabolicEnabled: true
     property int maxParabolicRise: 12
-    property real targetRise: 0
 
-    // Frozen zoom/rise: tracks targetZoom while mouse is in area,
-    // freezes at last value when mouse leaves (for smooth exit animation)
-    property real activeZoom: 1.0
-    property real activeRise: 0
-
-    onTargetZoomChanged: {
-        if (isTransitioning) activeZoom = targetZoom;
-    }
-    onTargetRiseChanged: {
-        if (isTransitioning) activeRise = targetRise;
-    }
-    onIsTransitioningChanged: {
-        if (isTransitioning) {
-            // Reset frozen values at start of new hover
-            activeZoom = targetZoom;
-            activeRise = targetRise;
-        }
-    }
-
-    // Zoom multiplier: animates 0→1 on enter, 1→0 on exit.
-    property real zoomMultiplier: isTransitioning ? 1.0 : 0.0
-    Behavior on zoomMultiplier {
-        NumberAnimation { duration: taskItem.zoomDuration; easing.type: Easing.OutCubic }
-    }
-
-    // Computed display values: instant response via activeZoom, smooth enter/exit via multiplier
-    readonly property real displayZoom: 1.0 + (activeZoom - 1.0) * zoomMultiplier
-    readonly property real displayRise: activeRise * zoomMultiplier
+    // Set by TaskList
+    property real displayZoom: 1.0
+    property real displayRise: 0
 
     // Hover state
     property bool hovered: mouseArea.containsMouse
@@ -152,7 +124,6 @@ Item {
         hoverChanged(hovered);
     }
 
-    // Fixed size for stable layout - zoom is purely visual (no layout shifts)
     width: baseSize
     height: baseSize
 

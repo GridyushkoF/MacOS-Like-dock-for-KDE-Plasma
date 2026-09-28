@@ -18,6 +18,7 @@ Item {
     property real zoomFactor: 1.5
     property int zoomDuration: 150
     property bool zoomNeighbors: true
+    property bool growOnMagnifiedSide: true
     property real neighborZoomFactor: 1.2
     property int iconSpacing: 1
     property bool widgetHovered: false
@@ -40,9 +41,21 @@ Item {
 
     property int hoveredIndex: -1
 
-    // Continuous mouse position for smooth zoom transitions
-    property real mousePos: -1  // Position along the icon row (x for horizontal, y for vertical)
+    // Cursor in resting space, kept after leaving so the dock shrinks in place
+    property real pointerCursor: 0
+    property bool cursorKnown: false
     property bool mouseInArea: false
+
+    property real zoomStrength: mouseInArea && cursorKnown ? 1 : 0
+    Behavior on zoomStrength {
+        NumberAnimation { duration: taskListRoot.zoomDuration; easing.type: Easing.OutCubic }
+    }
+
+    // 0 = rest length, 1 = hover length
+    property real panelProgress: mouseInArea && cursorKnown ? 1 : 0
+    Behavior on panelProgress {
+        NumberAnimation { duration: taskListRoot.zoomDuration; easing.type: Easing.InOutCubic }
+    }
 
     // Tracks whether mouse has moved recently (to distinguish "left" from "stationary")
     property bool mouseMovedRecently: false
@@ -77,7 +90,6 @@ Item {
     function resetHoverState() {
         taskListRoot.hoveredIndex = -1;
         taskListRoot.mouseInArea = false;
-        taskListRoot.mousePos = -1;
         taskListRoot.mouseMovedRecently = false;
     }
 
@@ -203,14 +215,148 @@ Item {
         return Math.max(minIconSize, shrunkSize);
     }
 
-    // Fixed implicit size based on item count - completely static
-    readonly property int contentSize: taskRepeater.count * effectiveIconSize + Math.max(0, taskRepeater.count - 1) * itemSpacing
-    // Extra strip after the last icon so a file can be dropped onto the dock
-    // itself (pin default app) instead of onto an existing icon (open with).
-    readonly property int launcherDropGutter: Kirigami.Units.gridUnit
+    // Half the spacing on each side keeps the row centered
+    readonly property real cellSize: effectiveIconSize + itemSpacing
+    readonly property real restLength: taskRepeater.count * cellSize
 
-    implicitWidth: vertical ? panelThickness : contentSize + launcherDropGutter
-    implicitHeight: vertical ? contentSize + launcherDropGutter : panelThickness
+    function smoothstep(edge0, edge1, x) {
+        var t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+        return t * t * (3 - 2 * t);
+    }
+
+    function targetZoomAt(index) {
+        if (!cursorKnown) return 1.0;
+        return zoomAtCursor(index, pointerCursor);
+    }
+
+    function zoomAtCursor(index, cursor) {
+        if (!zoomEnabled) return 1.0;
+
+        // In cells from this icon's center
+        var normalizedDistance = Math.abs(cursor - (index + 0.5) * cellSize) / cellSize;
+
+        var maxZoom = zoomFactor;
+        var borderZoom = zoomNeighbors ? neighborZoomFactor : 1.0;
+        var maxDist = zoomNeighbors ? 2.5 : 0.5;
+        var minZoom = shrinkDistant ? distantShrinkFactor : 1.0;
+        var farDist = maxDist + 2.0;  // Distance at which icons reach minimum size
+
+        if (normalizedDistance <= 0.5) {
+            return maxZoom + (borderZoom - maxZoom) * smoothstep(0, 0.5, normalizedDistance);
+        } else if (normalizedDistance <= maxDist) {
+            return borderZoom + (1.0 - borderZoom) * smoothstep(0.5, maxDist, normalizedDistance);
+        } else if (shrinkDistant && normalizedDistance <= farDist) {
+            return 1.0 + (minZoom - 1.0) * smoothstep(maxDist, farDist, normalizedDistance);
+        }
+        return minZoom;
+    }
+
+    function targetRiseAt(index) {
+        if (!parabolicEnabled || !cursorKnown) return 0;
+
+        var normalizedDistance = Math.abs(pointerCursor - (index + 0.5) * cellSize) / cellSize;
+        var maxDist = 2.5;
+        if (normalizedDistance <= maxDist) {
+            return maxParabolicRise * (1 - smoothstep(0, maxDist, normalizedDistance));
+        }
+        return 0;
+    }
+
+    // Growth before the cursor, so the icon under it stays put
+    function leadingGrowthOf(zooms, cursor) {
+        if (!growOnMagnifiedSide) {
+            return cellSize * zooms.reduce((sum, zoom) => sum + zoom - 1, 0) / 2;
+        }
+        var growth = 0;
+        for (var index = 0; index < zooms.length; index++) {
+            var coveredFraction = Math.max(0, Math.min(1, cursor / cellSize - index));
+            growth += cellSize * (zooms[index] - 1) * coveredFraction;
+        }
+        return growth;
+    }
+
+    readonly property var zoomLayout: {
+        var zooms = [];
+        var starts = [];
+        var length = 0;
+        for (var index = 0; index < taskRepeater.count; index++) {
+            var zoom = 1.0 + (targetZoomAt(index) - 1.0) * zoomStrength;
+            zooms.push(zoom);
+            starts.push(length);
+            length += cellSize * zoom;
+        }
+        var leadingGrowth = leadingGrowthOf(zooms, pointerCursor);
+        return {
+            zooms: zooms,
+            starts: starts,
+            length: length,
+            leadingGrowth: leadingGrowth,
+            trailingGrowth: length - restLength - leadingGrowth
+        };
+    }
+
+    // Most the magnified row can grow to either side
+    readonly property real maximumSideGrowth: {
+        var widest = 0;
+        var samplesPerCell = 8;
+        for (var sample = 0; sample <= taskRepeater.count * samplesPerCell; sample++) {
+            var cursor = sample * cellSize / samplesPerCell;
+            var zooms = [];
+            var growth = 0;
+            for (var index = 0; index < taskRepeater.count; index++) {
+                zooms.push(zoomAtCursor(index, cursor));
+                growth += cellSize * (zooms[index] - 1);
+            }
+            var leadingGrowth = leadingGrowthOf(zooms, cursor);
+            widest = Math.max(widest, leadingGrowth, growth - leadingGrowth);
+        }
+        return widest;
+    }
+
+    // Fixed so hovering never resizes the panel; even to stay centered
+    readonly property int reservedSize: 2 * Math.ceil(restLength / 2 + maximumSideGrowth)
+
+    // Centered growth holds the mask at its widest while hovering
+    readonly property real maskLeadingGrowth: growOnMagnifiedSide ? zoomLayout.leadingGrowth : maximumSideGrowth * panelProgress
+    readonly property real maskTrailingGrowth: growOnMagnifiedSide ? zoomLayout.trailingGrowth : maximumSideGrowth * panelProgress
+
+    implicitWidth: vertical ? panelThickness : reservedSize
+    implicitHeight: vertical ? reservedSize : panelThickness
+
+    // Pins the row to the window center while a resize lands
+    property real windowCenterOffset: 0
+    property bool isCenteredInWindow: false
+
+    function updateWindowAlignment() {
+        var window = Window.window;
+        if (!window) return;
+        var origin = mapToItem(null, 0, 0);
+        var offset = vertical ? window.height / 2 - origin.y - height / 2
+                              : window.width / 2 - origin.x - width / 2;
+        var isResizing = (zoomStrength > 0 && zoomStrength < 1) || (panelProgress > 0 && panelProgress < 1);
+        if (!isResizing) {
+            isCenteredInWindow = Math.abs(offset) < 1;
+        }
+        windowCenterOffset = isCenteredInWindow ? offset : 0;
+    }
+
+    FrameAnimation {
+        running: taskListRoot.zoomStrength > 0 || taskListRoot.panelProgress > 0
+        onTriggered: taskListRoot.updateWindowAlignment()
+        onRunningChanged: taskListRoot.updateWindowAlignment()
+    }
+    onMouseInAreaChanged: updateWindowAlignment()
+
+    // Measured from the row center, which doesn't move with the magnification
+    function updateCursor(along) {
+        var length = vertical ? height : width;
+        pointerCursor = along - length / 2 - windowCenterOffset + restLength / 2;
+        cursorKnown = true;
+    }
+
+    function restIndexAtCursor() {
+        return Math.floor(pointerCursor / cellSize);
+    }
 
     // Volume popup dialog
     property var volumeDialog: null
@@ -264,9 +410,16 @@ Item {
                 required property var model
                 required property int index
 
-                // Manual positioning - no layout involvement
-                x: vertical ? (taskListRoot.width - width) / 2 : index * (effectiveIconSize + itemSpacing)
-                y: vertical ? index * (effectiveIconSize + itemSpacing) : (taskListRoot.height - height) / 2
+                readonly property real slotStart: ((vertical ? taskListRoot.height : taskListRoot.width) - taskListRoot.restLength) / 2
+                    + taskListRoot.windowCenterOffset
+                    - taskListRoot.zoomLayout.leadingGrowth
+                    + (taskListRoot.zoomLayout.starts[index] || 0)
+                readonly property real slotLength: taskListRoot.cellSize * (taskListRoot.zoomLayout.zooms[index] || 1)
+
+                x: vertical ? (taskListRoot.width - width) / 2 : slotStart
+                y: vertical ? slotStart : (taskListRoot.height - height) / 2
+                width: vertical ? taskListRoot.effectiveIconSize : slotLength
+                height: vertical ? slotLength : taskListRoot.effectiveIconSize
 
                 vertical: taskListRoot.vertical
                 panelLocation: taskListRoot.panelLocation
@@ -303,76 +456,11 @@ Item {
                 zoomEnabled: taskListRoot.zoomEnabled
                 maxZoomFactor: taskListRoot.zoomFactor
                 zoomDuration: taskListRoot.zoomDuration
-                isTransitioning: taskListRoot.mouseInArea
                 parabolicEnabled: taskListRoot.parabolicEnabled
                 maxParabolicRise: taskListRoot.maxParabolicRise
 
-                targetZoom: {
-                    if (!taskListRoot.zoomEnabled) return 1.0;
-                    if (!taskListRoot.mouseInArea || taskListRoot.mousePos < 0) return 1.0;
-
-                    // Calculate center position of this icon
-                    var itemSize = effectiveIconSize + itemSpacing;
-                    var iconCenter = index * itemSize + effectiveIconSize / 2;
-
-                    // Distance from mouse to icon center (in pixels)
-                    var pixelDistance = Math.abs(taskListRoot.mousePos - iconCenter);
-
-                    // Normalize distance: 0 = at center, 1 = one full icon away
-                    var normalizedDistance = pixelDistance / itemSize;
-
-                    // Smoothstep function for continuous transitions
-                    function smoothstep(edge0, edge1, x) {
-                        var t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
-                        return t * t * (3 - 2 * t);
-                    }
-
-                    // Define key points for interpolation
-                    var maxZoom = taskListRoot.zoomFactor;
-                    var borderZoom = taskListRoot.zoomNeighbors ? taskListRoot.neighborZoomFactor : 1.0;
-                    var maxDist = taskListRoot.zoomNeighbors ? 2.5 : 0.5;
-                    var minZoom = taskListRoot.shrinkDistant ? taskListRoot.distantShrinkFactor : 1.0;
-                    var farDist = maxDist + 2.0;  // Distance at which icons reach minimum size
-
-                    if (normalizedDistance <= 0.5) {
-                        // Inside main icon: smooth from maxZoom to borderZoom
-                        var t = smoothstep(0, 0.5, normalizedDistance);
-                        return maxZoom + (borderZoom - maxZoom) * t;
-                    } else if (normalizedDistance <= maxDist) {
-                        // Neighbor icons: smooth from borderZoom to 1.0
-                        var t = smoothstep(0.5, maxDist, normalizedDistance);
-                        return borderZoom + (1.0 - borderZoom) * t;
-                    } else if (taskListRoot.shrinkDistant && normalizedDistance <= farDist) {
-                        // Distant icons: smooth from 1.0 to minZoom
-                        var t = smoothstep(maxDist, farDist, normalizedDistance);
-                        return 1.0 + (minZoom - 1.0) * t;
-                    }
-
-                    return minZoom;
-                }
-
-                targetRise: {
-                    if (!taskListRoot.parabolicEnabled) return 0;
-                    if (!taskListRoot.mouseInArea || taskListRoot.mousePos < 0) return 0;
-
-                    var itemSize = effectiveIconSize + itemSpacing;
-                    var iconCenter = index * itemSize + effectiveIconSize / 2;
-                    var pixelDistance = Math.abs(taskListRoot.mousePos - iconCenter);
-                    var normalizedDistance = pixelDistance / itemSize;
-
-                    // Smoothstep function
-                    function smoothstep(edge0, edge1, x) {
-                        var t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
-                        return t * t * (3 - 2 * t);
-                    }
-
-                    var maxDist = 2.5;
-                    if (normalizedDistance <= maxDist) {
-                        var t = smoothstep(0, maxDist, normalizedDistance);
-                        return taskListRoot.maxParabolicRise * (1 - t);
-                    }
-                    return 0;
-                }
+                displayZoom: taskListRoot.zoomLayout.zooms[index] || 1.0
+                displayRise: taskListRoot.targetRiseAt(index) * taskListRoot.zoomStrength
 
                 onHoverChanged: function(isHovered) {
                     if (isHovered) {
@@ -380,32 +468,19 @@ Item {
                         activityTimer.restart();
                         taskListRoot.hoveredIndex = index;
                         taskListRoot.mouseInArea = true;
-                        // Initialize mousePos to icon center to prevent stale position bug
-                        var itemSize = effectiveIconSize + itemSpacing;
-                        taskListRoot.mousePos = index * itemSize + effectiveIconSize / 2;
                     } else if (taskListRoot.hoveredIndex === index) {
                         activityTimer.restart();
                     }
                 }
 
                 onMouseMoved: function(localX, localY) {
-                    // Convert local position to global position in the task list
-                    var itemSize = effectiveIconSize + itemSpacing;
-                    var globalPos;
-                    if (vertical) {
-                        globalPos = index * itemSize + localY;
-                    } else {
-                        globalPos = index * itemSize + localX;
-                    }
-                    taskListRoot.mousePos = globalPos;
+                    var position = taskDelegate.mapToItem(taskListRoot, localX, localY);
+                    taskListRoot.updateCursor(vertical ? position.y : position.x);
 
                     // Handle drag reordering
                     if (isDragging && taskListRoot.dragInProgress) {
-                        var targetIdx = Math.floor(globalPos / itemSize);
-                        targetIdx = Math.max(0, Math.min(targetIdx, taskRepeater.count - 1));
+                        var targetIdx = Math.max(0, Math.min(taskListRoot.restIndexAtCursor(), taskRepeater.count - 1));
                         if (targetIdx !== taskListRoot.dragSourceIndex) {
-                            var sourceModelIndex = taskListRoot.model.makeModelIndex(taskListRoot.dragSourceIndex);
-                            var targetModelIndex = taskListRoot.model.makeModelIndex(targetIdx);
                             taskListRoot.model.move(taskListRoot.dragSourceIndex, targetIdx);
                             taskListRoot.dragSourceIndex = targetIdx;
                         }
@@ -469,12 +544,12 @@ Item {
                 taskListRoot.mouseMovedRecently = true;
                 activityTimer.restart();
                 taskListRoot.mouseInArea = true;
-                taskListRoot.mousePos = vertical ? mouse.y : mouse.x;
+                taskListRoot.updateCursor(vertical ? mouse.y : mouse.x);
 
-                var itemSize = effectiveIconSize + itemSpacing;
-                var idx = Math.floor((vertical ? mouse.y : mouse.x) / itemSize);
-                if (idx >= 0 && idx < taskRepeater.count) {
-                    taskListRoot.hoveredIndex = idx;
+                var hoveredRestIndex = taskListRoot.restIndexAtCursor();
+                var isOverTask = hoveredRestIndex >= 0 && hoveredRestIndex < taskRepeater.count;
+                if (isOverTask) {
+                    taskListRoot.hoveredIndex = hoveredRestIndex;
                 }
             }
 
