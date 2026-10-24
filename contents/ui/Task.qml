@@ -37,8 +37,12 @@ Item {
     property bool isActive: false
     property bool isMinimized: false
     property bool isLauncher: false
+    property bool isStartup: false
     property bool isDemandingAttention: false
     property bool isGroupParent: false
+
+    // Last rectangle sent to KWin. Width -1 means "never published".
+    property rect lastIconGeometry: Qt.rect(0, 0, -1, -1)
 
     // Group properties
     property int groupChildCount: 0

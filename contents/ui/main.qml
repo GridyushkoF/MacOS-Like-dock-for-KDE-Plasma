@@ -249,27 +249,10 @@ PlasmoidItem {
             availableSpace: root.vertical ? root.height : root.width
 
             onTaskClicked: function(index, button, modifiers) {
-                var modelIndex = tasksModel.makeModelIndex(index);
-                var isActive = tasksModel.data(modelIndex, TaskManager.AbstractTasksModel.IsActive);
-                var isLauncher = tasksModel.data(modelIndex, TaskManager.AbstractTasksModel.IsLauncher);
-                var isMinimized = tasksModel.data(modelIndex, TaskManager.AbstractTasksModel.IsMinimized);
-                var isGroupParent = tasksModel.data(modelIndex, TaskManager.AbstractTasksModel.IsGroupParent);
-
                 if (button === Qt.LeftButton) {
-                    if (modifiers & Qt.ShiftModifier) {
-                        tasksModel.requestNewInstance(modelIndex);
-                    } else if (isGroupParent) {
-                        // Cycle through group windows on click
-                        root.cycleGroupWindows(index);
-                    } else if (isLauncher) {
-                        tasksModel.requestActivate(modelIndex);
-                    } else if (isActive) {
-                        tasksModel.requestToggleMinimized(modelIndex);
-                    } else {
-                        tasksModel.requestActivate(modelIndex);
-                    }
+                    root.activateEntry(index, modifiers);
                 } else if (button === Qt.MiddleButton) {
-                    handleMiddleClick(modelIndex);
+                    handleMiddleClick(tasksModel.makeModelIndex(index));
                 }
             }
 
@@ -352,6 +335,95 @@ PlasmoidItem {
         }
     }
 
+    // Screen output this dock sits on, used to ignore Meta+number
+    // presses aimed at a dock on another monitor.
+    readonly property string screenOutputName: {
+        const geo = Plasmoid.containment.screenGeometry;
+        if (!geo) {
+            return "";
+        }
+        const screens = Qt.application.screens;
+        for (let i = 0; i < screens.length; ++i) {
+            const screen = screens[i];
+            if (Math.abs(screen.virtualX - geo.x) < 2 && Math.abs(screen.virtualY - geo.y) < 2) {
+                return screen.name;
+            }
+        }
+        return "";
+    }
+
+    // Plasmashell looks this up as activateTaskAtIndex(QVariant).
+    // The argument must stay untyped; "index: int" is a different method.
+    property int lastShortcutIndex: -2
+    property double lastShortcutAt: 0
+
+    function activateTaskAtIndex(index) {
+        let i = Number(index);
+        if (!isFinite(i)) {
+            return;
+        }
+        i = Math.trunc(i);
+        const now = Date.now();
+        if (i === lastShortcutIndex && (now - lastShortcutAt) < 250) {
+            return;
+        }
+        lastShortcutAt = now;
+        lastShortcutIndex = i;
+        activateEntry(i, 0);
+    }
+
+    function activateEntry(index, modifiers) {
+        if (index < 0 || index >= tasksModel.count) {
+            return;
+        }
+        const modelIndex = tasksModel.makeModelIndex(index);
+        const isActive = tasksModel.data(modelIndex, TaskManager.AbstractTasksModel.IsActive);
+        const isLauncher = tasksModel.data(modelIndex, TaskManager.AbstractTasksModel.IsLauncher);
+        const isGroupParent = tasksModel.data(modelIndex, TaskManager.AbstractTasksModel.IsGroupParent);
+
+        if (modifiers & Qt.ShiftModifier) {
+            tasksModel.requestNewInstance(modelIndex);
+            return;
+        }
+        // Publish before minimize/restore so Squash and Magic Lamp see this icon.
+        taskList.publishIconGeometries();
+        if (isGroupParent) {
+            root.cycleGroupWindows(index);
+        } else if (isLauncher || !isActive) {
+            tasksModel.requestActivate(modelIndex);
+        } else {
+            tasksModel.requestToggleMinimized(modelIndex);
+        }
+    }
+
+    Loader {
+        id: taskShortcutLoader
+        visible: false
+        width: 0
+        height: 0
+        source: "TaskShortcuts.qml"
+        onStatusChanged: {
+            if (status === Loader.Error) {
+                console.warn("Icons-Only Task Manager 2: Meta+number helper failed to load:", errorString);
+            }
+        }
+        onLoaded: {
+            if (!item) {
+                return;
+            }
+            item.entryActivated.connect(function(index) {
+                root.activateTaskAtIndex(index);
+            });
+        }
+    }
+
+    Binding {
+        target: taskShortcutLoader.item
+        when: taskShortcutLoader.item !== null
+        property: "outputName"
+        value: root.screenOutputName
+    }
+
     function showGroupDialog(index) {
         if (activeGroupDialog) {
             activeGroupDialog.visible = false;
@@ -427,6 +499,20 @@ PlasmoidItem {
         case 5: // Bring to Current Desktop
             tasksModel.requestVirtualDesktops(modelIndex, [virtualDesktopInfo.currentDesktop]);
             break;
+        }
+    }
+
+    Connections {
+        target: Plasmoid
+        function onLocationChanged() {
+            taskList.schedulePublishIconGeometries();
+        }
+    }
+
+    Connections {
+        target: Plasmoid.containment
+        function onScreenGeometryChanged() {
+            taskList.schedulePublishIconGeometries();
         }
     }
 

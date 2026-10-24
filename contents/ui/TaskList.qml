@@ -139,6 +139,98 @@ Item {
         return taskRepeater.itemAt(index);
     }
 
+    // KWin's Magic Lamp falls back to the cursor, and Squash skips the
+    // animation, unless a task manager publishes each window's icon rect.
+    // Stock plasma-desktop does parent-to-scene, then QWindow::mapToGlobal.
+    // PanelView does not expose that method to QML. Item.mapToGlobal is the
+    // same two steps: the delegate is not scaled (the zoom is a child), so
+    // its origin is the slot KWin should aim at.
+    function globalRectOf(item) {
+        if (!item || !item.Window.window) {
+            return null;
+        }
+        if (item.width < 1 || item.height < 1) {
+            return null;
+        }
+        const globalPos = item.mapToGlobal(0, 0);
+        if (!globalPos || globalPos.x === undefined) {
+            return null;
+        }
+        return Qt.rect(Math.round(globalPos.x), Math.round(globalPos.y),
+                       Math.round(item.width), Math.round(item.height));
+    }
+
+    function schedulePublishIconGeometries() {
+        iconGeometryTimer.restart();
+    }
+
+    function publishIconGeometries() {
+        if (!model) {
+            return;
+        }
+        const count = taskRepeater.count;
+        for (let i = 0; i < count; ++i) {
+            const task = taskRepeater.itemAt(i);
+            if (!task) {
+                continue;
+            }
+            // Launchers and startups have no window yet. A group parent
+            // publishes one rect; TasksModel copies it to every child.
+            if (task.isLauncher || task.isStartup) {
+                task.lastIconGeometry = Qt.rect(0, 0, -1, -1);
+                continue;
+            }
+            const rect = globalRectOf(task);
+            if (!rect || rect.width < 1 || rect.height < 1) {
+                continue;
+            }
+            const prev = task.lastIconGeometry;
+            if (prev.width === rect.width && prev.height === rect.height
+                    && prev.x === rect.x && prev.y === rect.y) {
+                continue;
+            }
+            const modelIndex = model.makeModelIndex(i);
+            if (!modelIndex || !modelIndex.valid) {
+                continue;
+            }
+            model.requestPublishDelegateGeometry(modelIndex, rect, task);
+            task.lastIconGeometry = rect;
+        }
+    }
+
+    Timer {
+        id: iconGeometryTimer
+        interval: 50
+        onTriggered: taskListRoot.publishIconGeometries()
+    }
+
+    // The panel window is often still at 0,0 when the first delegates appear.
+    Timer {
+        interval: 200
+        running: true
+        onTriggered: taskListRoot.publishIconGeometries()
+    }
+
+    Timer {
+        interval: 800
+        running: true
+        onTriggered: taskListRoot.publishIconGeometries()
+    }
+
+    Timer {
+        interval: 2000
+        running: true
+        onTriggered: taskListRoot.publishIconGeometries()
+    }
+
+    Connections {
+        target: taskListRoot.Window.window
+        function onXChanged() { taskListRoot.schedulePublishIconGeometries(); }
+        function onYChanged() { taskListRoot.schedulePublishIconGeometries(); }
+        function onWidthChanged() { taskListRoot.schedulePublishIconGeometries(); }
+        function onHeightChanged() { taskListRoot.schedulePublishIconGeometries(); }
+    }
+
     // Counter that increments on model changes to force rebinding
     property int modelUpdateCounter: 0
 
@@ -276,6 +368,7 @@ Item {
                 isActive: model.IsActive || false
                 isMinimized: model.IsMinimized || false
                 isLauncher: model.IsLauncher || false
+                isStartup: (model && model.IsStartup) ? true : false
                 isDemandingAttention: model.IsDemandingAttention || false
                 isGroupParent: model.IsGroupParent || false
 
@@ -449,7 +542,17 @@ Item {
                 onDragHoverChanged: function(isDragHovered) {
                     taskListRoot.taskDragHover(index, isDragHovered);
                 }
+
+                onXChanged: taskListRoot.schedulePublishIconGeometries()
+                onYChanged: taskListRoot.schedulePublishIconGeometries()
+                onWidthChanged: taskListRoot.schedulePublishIconGeometries()
+                onHeightChanged: taskListRoot.schedulePublishIconGeometries()
+                onIsLauncherChanged: taskListRoot.schedulePublishIconGeometries()
+                onIsStartupChanged: taskListRoot.schedulePublishIconGeometries()
             }
+
+            onItemAdded: taskListRoot.schedulePublishIconGeometries()
+            onItemRemoved: taskListRoot.schedulePublishIconGeometries()
         }
 
         // Global mouse area to track position across all icons
