@@ -34,6 +34,9 @@ Item {
     property int taskIndex: 0
     property var iconSource: ""
     property string taskName: ""
+    // Scaled icon box. Kirigami.Icon does not expose mapToItem, so geometry
+    // is taken from this plain Item. Its scale is the painted size.
+    property alias iconItem: iconContainer
     property bool isActive: false
     property bool isMinimized: false
     property bool isLauncher: false

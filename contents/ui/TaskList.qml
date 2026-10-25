@@ -139,25 +139,65 @@ Item {
         return taskRepeater.itemAt(index);
     }
 
-    // KWin's Magic Lamp falls back to the cursor, and Squash skips the
-    // animation, unless a task manager publishes each window's icon rect.
-    // Stock plasma-desktop does parent-to-scene, then QWindow::mapToGlobal.
-    // PanelView does not expose that method to QML. Item.mapToGlobal is the
-    // same two steps: the delegate is not scaled (the zoom is a child), so
-    // its origin is the slot KWin should aim at.
-    function globalRectOf(item) {
-        if (!item || !item.Window.window) {
+    // WaylandTasksModel ignores the QRect and also ignores item transforms.
+    // It sends delegate.x/y/width/height mapped through the parent. The zoom
+    // lives on a child scale, so the task slot is not the painted icon, and
+    // the gap grows with the panel size on a scaled screen. This stand-in is
+    // reparented to the panel scene root and sized to the icon's real bounds;
+    // the model reads it synchronously, so one item can serve every task.
+    Item {
+        id: iconGeometryDelegate
+        visible: false
+        enabled: false
+    }
+
+    function sceneRoot() {
+        const window = taskListRoot.Window.window;
+        return window ? window.contentItem : null;
+    }
+
+    // Axis-aligned bounds of the painted icon, in `target`'s coordinates.
+    // mapToItem includes the icon scale and the parabolic rise.
+    function boundsIn(item, target) {
+        if (!item || !target || item.width < 1 || item.height < 1) {
             return null;
         }
-        if (item.width < 1 || item.height < 1) {
+        if (typeof item.mapToItem !== "function") {
             return null;
         }
-        const globalPos = item.mapToGlobal(0, 0);
-        if (!globalPos || globalPos.x === undefined) {
+        const tl = item.mapToItem(target, 0, 0);
+        const br = item.mapToItem(target, item.width, item.height);
+        if (!tl || !br || tl.x === undefined || br.x === undefined) {
             return null;
         }
-        return Qt.rect(Math.round(globalPos.x), Math.round(globalPos.y),
-                       Math.round(item.width), Math.round(item.height));
+        const w = Math.abs(br.x - tl.x);
+        const h = Math.abs(br.y - tl.y);
+        if (w < 1 || h < 1) {
+            return null;
+        }
+        return Qt.rect(Math.round(Math.min(tl.x, br.x)), Math.round(Math.min(tl.y, br.y)),
+                       Math.round(w), Math.round(h));
+    }
+
+    // X11 uses this rect and multiplies it by the application scale.
+    // mapToGlobal is logical pixels, which is what that multiplication expects.
+    function globalRectOf(icon) {
+        if (!icon || !icon.Window.window || icon.width < 1 || icon.height < 1) {
+            return null;
+        }
+        const tl = icon.mapToGlobal(0, 0);
+        const br = icon.mapToGlobal(icon.width, icon.height);
+        if (!tl || !br || tl.x === undefined || br.x === undefined) {
+            return null;
+        }
+        const x = Math.min(tl.x, br.x);
+        const y = Math.min(tl.y, br.y);
+        const w = Math.abs(br.x - tl.x);
+        const h = Math.abs(br.y - tl.y);
+        if (w < 1 || h < 1) {
+            return null;
+        }
+        return Qt.rect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
     }
 
     function schedulePublishIconGeometries() {
@@ -168,6 +208,14 @@ Item {
         if (!model) {
             return;
         }
+        try {
+            publishIconGeometriesNow();
+        } catch (error) {
+            console.warn("Icons-Only Task Manager 2: icon geometry skipped:", error);
+        }
+    }
+
+    function publishIconGeometriesNow() {
         const count = taskRepeater.count;
         for (let i = 0; i < count; ++i) {
             const task = taskRepeater.itemAt(i);
@@ -180,8 +228,11 @@ Item {
                 task.lastIconGeometry = Qt.rect(0, 0, -1, -1);
                 continue;
             }
-            const rect = globalRectOf(task);
-            if (!rect || rect.width < 1 || rect.height < 1) {
+            const root = sceneRoot();
+            const icon = task.iconItem;
+            const local = boundsIn(icon, root);
+            const rect = globalRectOf(icon);
+            if (!root || !local || !rect) {
                 continue;
             }
             const prev = task.lastIconGeometry;
@@ -193,7 +244,14 @@ Item {
             if (!modelIndex || !modelIndex.valid) {
                 continue;
             }
-            model.requestPublishDelegateGeometry(modelIndex, rect, task);
+            if (iconGeometryDelegate.parent !== root) {
+                iconGeometryDelegate.parent = root;
+            }
+            iconGeometryDelegate.x = local.x;
+            iconGeometryDelegate.y = local.y;
+            iconGeometryDelegate.width = local.width;
+            iconGeometryDelegate.height = local.height;
+            model.requestPublishDelegateGeometry(modelIndex, rect, iconGeometryDelegate);
             task.lastIconGeometry = rect;
         }
     }
@@ -549,6 +607,8 @@ Item {
                 onHeightChanged: taskListRoot.schedulePublishIconGeometries()
                 onIsLauncherChanged: taskListRoot.schedulePublishIconGeometries()
                 onIsStartupChanged: taskListRoot.schedulePublishIconGeometries()
+                onDisplayZoomChanged: taskListRoot.schedulePublishIconGeometries()
+                onDisplayRiseChanged: taskListRoot.schedulePublishIconGeometries()
             }
 
             onItemAdded: taskListRoot.schedulePublishIconGeometries()

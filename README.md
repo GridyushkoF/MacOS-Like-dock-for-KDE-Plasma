@@ -4,6 +4,11 @@ macOS-like icon dock for Plasma 6: zoom on hover, parabolic rise, pin launchers.
 
 https://store.kde.org/p/2352806/
 
+## 1.4.1
+
+- Magic Lamp follows the painted icon, including on a scaled screen.
+- Clicking a dock icon still launches or minimizes if icon geometry cannot be published.
+
 ## 1.4
 
 - Magic Lamp and the normal minimize animation target the dock icon.

@@ -385,8 +385,12 @@ PlasmoidItem {
             tasksModel.requestNewInstance(modelIndex);
             return;
         }
-        // Publish before minimize/restore so Squash and Magic Lamp see this icon.
-        taskList.publishIconGeometries();
+        // Geometry must not block launch or minimize if publishing fails.
+        try {
+            taskList.publishIconGeometries();
+        } catch (error) {
+            console.warn("Icons-Only Task Manager 2: icon geometry skipped:", error);
+        }
         if (isGroupParent) {
             root.cycleGroupWindows(index);
         } else if (isLauncher || !isActive) {
