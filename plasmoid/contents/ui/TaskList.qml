@@ -18,6 +18,8 @@ Item {
     property real zoomFactor: 1.5
     property int zoomDuration: 150
     property bool zoomNeighbors: true
+    // Off: icons scale in place and the row keeps its resting length.
+    property bool growingDock: true
     property bool growOnMagnifiedSide: true
     property real neighborZoomFactor: 1.2
     property int iconSpacing: 1
@@ -41,18 +43,40 @@ Item {
 
     property int hoveredIndex: -1
 
-    // Cursor in resting space, kept after leaving so the dock shrinks in place
+    // Cursor in resting space, kept after leaving so the dock shrinks in place.
+    // Magnification is the bell at this position. Mouse events only store
+    // pointerTarget; the row copies it once a frame, which is not a follow delay.
+    property real pointerTarget: 0
     property real pointerCursor: 0
+    FrameAnimation {
+        id: magnifyFrames
+        running: taskListRoot.magnified || taskListRoot.zoomStrength > 0.001
+        onTriggered: {
+            if (Math.abs(taskListRoot.pointerTarget - taskListRoot.pointerCursor) > 0.01)
+                taskListRoot.pointerCursor = taskListRoot.pointerTarget;
+        }
+    }
     property bool cursorKnown: false
     property bool mouseInArea: false
+    // Latched separately from hover events. A one-frame hover drop must not
+    // reverse zoomStrength, or the row grows and shrinks in place (the shake).
+    property bool magnified: false
+    // Screen position of the resting row, captured when magnification starts.
+    // Re-reading it every move feeds the dock's own slide back into the cursor.
+    property real frozenRestZero: 0
+    property bool restFrozen: false
+    property real lastPointerMs: 0
+    // Resting row offset inside this item. Frozen while magnified so a 1px
+    // panel resize cannot slide every icon.
+    property real pinnedCenter: 0
 
-    property real zoomStrength: mouseInArea && cursorKnown ? 1 : 0
+    property real zoomStrength: magnified && cursorKnown ? 1 : 0
     Behavior on zoomStrength {
         NumberAnimation { duration: taskListRoot.zoomDuration; easing.type: Easing.OutCubic }
     }
 
     // 0 = rest length, 1 = hover length
-    property real panelProgress: mouseInArea && cursorKnown ? 1 : 0
+    property real panelProgress: magnified && cursorKnown ? 1 : 0
     Behavior on panelProgress {
         NumberAnimation { duration: taskListRoot.zoomDuration; easing.type: Easing.InOutCubic }
     }
@@ -90,13 +114,31 @@ Item {
     function resetHoverState() {
         taskListRoot.hoveredIndex = -1;
         taskListRoot.mouseInArea = false;
+        taskListRoot.magnified = false;
         taskListRoot.mouseMovedRecently = false;
+        taskListRoot.restFrozen = false;
+        taskListRoot.pinRowCenter();
     }
 
-    // Force reset from parent (called by HoverHandler in main.qml)
+    function pinRowCenter() {
+        var length = vertical ? height : width;
+        pinnedCenter = (length - restLength) / 2;
+    }
+
+    // One frame, so a false leave during a fast swipe does not drop the zoom.
+    // Long enough to notice was the old 140–350ms hold.
     function forceResetHover() {
-        activityTimer.stop();
-        resetHoverState();
+        leaveTimer.restart();
+    }
+
+    Timer {
+        id: leaveTimer
+        interval: 16
+        onTriggered: {
+            if (!globalMouseArea.containsMouse) {
+                taskListRoot.resetHoverState();
+            }
+        }
     }
 
     // Two-phase exit detection that doesn't rely on onExited or containsMouse:
@@ -121,8 +163,8 @@ Item {
         id: confirmTimer
         interval: 100
         onTriggered: {
-            if (!taskListRoot.mouseMovedRecently && !taskListRoot.widgetHovered) {
-                resetHoverState();
+            if (!taskListRoot.mouseMovedRecently && !globalMouseArea.containsMouse) {
+                taskListRoot.resetHoverState();
             }
         }
     }
@@ -213,8 +255,16 @@ Item {
     }
 
     function schedulePublishIconGeometries() {
+        // While the row is following the pointer, x and zoom change every
+        // frame. Publishing that asks KWin to update every minimized window
+        // and drops frames on a fast swipe.
+        if (magnified) {
+            return;
+        }
         iconGeometryTimer.restart();
     }
+
+    onMagnifiedChanged: if (!magnified) iconGeometryTimer.restart()
 
     function publishIconGeometries() {
         if (!model) {
@@ -369,47 +419,77 @@ Item {
     readonly property real cellSize: effectiveIconSize + itemSpacing
     readonly property real restLength: taskRepeater.count * cellSize
 
-    function smoothstep(edge0, edge1, x) {
-        var t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
-        return t * t * (3 - 2 * t);
-    }
-
     function targetZoomAt(index) {
         if (!cursorKnown) return 1.0;
         return zoomAtCursor(index, pointerCursor);
     }
 
+    // Raised cosine. Slope is zero on the icon under the cursor, so the
+    // peak does not pop, and the falloff is spread out instead of delayed.
+    function magnificationRadius() {
+        if (!zoomNeighbors)
+            return 0.75;
+        var span = zoomFactor - 1.0;
+        if (span < 0.02)
+            return 3.0;
+        var ratio = (neighborZoomFactor - 1.0) / span;
+        ratio = Math.max(0.08, Math.min(0.92, ratio));
+        return Math.PI / Math.acos(2 * ratio - 1);
+    }
+
+    // One raised cosine across the whole influence, same shape as the macOS
+    // dock. The old curve held the neighbor flat, then dropped to rest in
+    // half an icon, which reads as a snap when the cursor is followed live.
+    // Radius stops at 2 so the icon past the neighbor stays put.
+    function influenceRadius() {
+        if (!zoomNeighbors)
+            return 0.75;
+        return Math.min(magnificationRadius(), 2);
+    }
+
+    function magnificationBell(normalizedDistance) {
+        var maxDist = influenceRadius();
+        if (normalizedDistance >= maxDist)
+            return 0;
+        return 0.5 * (1 + Math.cos(Math.PI * normalizedDistance / maxDist));
+    }
+
     function zoomAtCursor(index, cursor) {
         if (!zoomEnabled) return 1.0;
 
-        // In cells from this icon's center
         var normalizedDistance = Math.abs(cursor - (index + 0.5) * cellSize) / cellSize;
-
-        var maxZoom = zoomFactor;
-        var borderZoom = zoomNeighbors ? neighborZoomFactor : 1.0;
-        var maxDist = zoomNeighbors ? 2.5 : 0.5;
-        var minZoom = shrinkDistant ? distantShrinkFactor : 1.0;
-        var farDist = maxDist + 2.0;  // Distance at which icons reach minimum size
-
-        if (normalizedDistance <= 0.5) {
-            return maxZoom + (borderZoom - maxZoom) * smoothstep(0, 0.5, normalizedDistance);
-        } else if (normalizedDistance <= maxDist) {
-            return borderZoom + (1.0 - borderZoom) * smoothstep(0.5, maxDist, normalizedDistance);
-        } else if (shrinkDistant && normalizedDistance <= farDist) {
-            return 1.0 + (minZoom - 1.0) * smoothstep(maxDist, farDist, normalizedDistance);
-        }
-        return minZoom;
+        var bell = magnificationBell(normalizedDistance);
+        if (bell > 0)
+            return 1.0 + (zoomFactor - 1.0) * bell;
+        if (!shrinkDistant)
+            return 1.0;
+        var far = magnificationRadius() + 2.0;
+        if (normalizedDistance >= far)
+            return distantShrinkFactor;
+        var edge = 0.5 * (1 + Math.cos(Math.PI * (normalizedDistance - magnificationRadius()) / 2.0));
+        return distantShrinkFactor + (1.0 - distantShrinkFactor) * edge;
     }
 
     function targetRiseAt(index) {
         if (!parabolicEnabled || !cursorKnown) return 0;
-
         var normalizedDistance = Math.abs(pointerCursor - (index + 0.5) * cellSize) / cellSize;
-        var maxDist = 2.5;
-        if (normalizedDistance <= maxDist) {
-            return maxParabolicRise * (1 - smoothstep(0, maxDist, normalizedDistance));
-        }
-        return 0;
+        return maxParabolicRise * magnificationBell(normalizedDistance);
+    }
+
+    // Neighbors ease aside across the same hump as the zoom. The icon under
+    // the cursor and anything past the hump stay on their resting slot.
+    function localShiftOf(index, visualZoom, cursor) {
+        if (!growingDock)
+            return 0;
+        var center = (index + 0.5) * cellSize;
+        var delta = center - cursor;
+        var nd = Math.abs(delta) / cellSize;
+        var maxDist = influenceRadius();
+        if (nd >= maxDist || nd < 0.001)
+            return 0;
+        var window = Math.sin(Math.PI * nd / maxDist);
+        var extra = cellSize * (visualZoom - 1);
+        return (delta >= 0 ? 1 : -1) * extra * 0.5 * window;
     }
 
     // Growth before the cursor, so the icon under it stays put
@@ -427,26 +507,33 @@ Item {
 
     readonly property var zoomLayout: {
         var zooms = [];
-        var starts = [];
-        var length = 0;
-        for (var index = 0; index < taskRepeater.count; index++) {
-            var zoom = 1.0 + (targetZoomAt(index) - 1.0) * zoomStrength;
+        var shifts = [];
+        var rises = [];
+        var count = taskRepeater.count;
+        var cursor = pointerCursor;
+        for (var index = 0; index < count; index++) {
+            var zoom = 1.0 + (zoomAtCursor(index, cursor) - 1.0) * zoomStrength;
             zooms.push(zoom);
-            starts.push(length);
-            length += cellSize * zoom;
+            var normalizedDistance = Math.abs(cursor - (index + 0.5) * cellSize) / cellSize;
+            rises.push((parabolicEnabled ? maxParabolicRise * magnificationBell(normalizedDistance) : 0) * zoomStrength);
         }
-        var leadingGrowth = leadingGrowthOf(zooms, pointerCursor);
+        for (var shiftIndex = 0; shiftIndex < count; shiftIndex++) {
+            shifts.push(localShiftOf(shiftIndex, zooms[shiftIndex], cursor));
+        }
         return {
             zooms: zooms,
-            starts: starts,
-            length: length,
-            leadingGrowth: leadingGrowth,
-            trailingGrowth: length - restLength - leadingGrowth
+            shifts: shifts,
+            rises: rises,
+            length: restLength,
+            leadingGrowth: 0,
+            trailingGrowth: 0
         };
     }
 
     // Most the magnified row can grow to either side
     readonly property real maximumSideGrowth: {
+        if (!growingDock)
+            return 0;
         var widest = 0;
         var samplesPerCell = 8;
         for (var sample = 0; sample <= taskRepeater.count * samplesPerCell; sample++) {
@@ -473,39 +560,44 @@ Item {
     implicitWidth: vertical ? panelThickness : reservedSize
     implicitHeight: vertical ? reservedSize : panelThickness
 
-    // Pins the row to the window center while a resize lands
-    property real windowCenterOffset: 0
-    property bool isCenteredInWindow: false
+    onWidthChanged: if (!magnified) pinRowCenter()
+    onHeightChanged: if (!magnified) pinRowCenter()
+    onRestLengthChanged: if (!magnified) pinRowCenter()
+    Component.onCompleted: pinRowCenter()
 
-    function updateWindowAlignment() {
-        var window = Window.window;
-        if (!window) return;
-        var origin = mapToItem(null, 0, 0);
-        var offset = vertical ? window.height / 2 - origin.y - height / 2
-                              : window.width / 2 - origin.x - width / 2;
-        var isResizing = (zoomStrength > 0 && zoomStrength < 1) || (panelProgress > 0 && panelProgress < 1);
-        if (!isResizing) {
-            isCenteredInWindow = Math.abs(offset) < 1;
+    // Screen cursor minus the resting row's screen position at the moment
+    // magnification started. The origin stays put, so the dock sliding under
+    // a still pointer cannot change the cursor and shake the row.
+    function notePointer(screenAlong) {
+        if (screenAlong === undefined || screenAlong === null) {
+            return;
         }
-        windowCenterOffset = isCenteredInWindow ? offset : 0;
-    }
-
-    FrameAnimation {
-        running: taskListRoot.zoomStrength > 0 || taskListRoot.panelProgress > 0
-        onTriggered: taskListRoot.updateWindowAlignment()
-        onRunningChanged: taskListRoot.updateWindowAlignment()
-    }
-    onMouseInAreaChanged: updateWindowAlignment()
-
-    // Measured from the row center, which doesn't move with the magnification
-    function updateCursor(along) {
-        var length = vertical ? height : width;
-        pointerCursor = along - length / 2 - windowCenterOffset + restLength / 2;
-        cursorKnown = true;
+        lastPointerMs = Date.now();
+        if (!restFrozen) {
+            var origin = null;
+            try {
+                origin = mapToGlobal(0, 0);
+            } catch (error) {
+                return;
+            }
+            if (!origin || origin.x === undefined) {
+                return;
+            }
+            pinRowCenter();
+            frozenRestZero = (vertical ? origin.y : origin.x) + pinnedCenter;
+            restFrozen = true;
+        }
+        pointerTarget = screenAlong - frozenRestZero;
+        magnified = true;
+        mouseInArea = true;
+        if (!cursorKnown) {
+            pointerCursor = pointerTarget;
+            cursorKnown = true;
+        }
     }
 
     function restIndexAtCursor() {
-        return Math.floor(pointerCursor / cellSize);
+        return Math.floor(pointerTarget / cellSize);
     }
 
     // Volume popup dialog
@@ -560,11 +652,10 @@ Item {
                 required property var model
                 required property int index
 
-                readonly property real slotStart: ((vertical ? taskListRoot.height : taskListRoot.width) - taskListRoot.restLength) / 2
-                    + taskListRoot.windowCenterOffset
-                    - taskListRoot.zoomLayout.leadingGrowth
-                    + (taskListRoot.zoomLayout.starts[index] || 0)
-                readonly property real slotLength: taskListRoot.cellSize * (taskListRoot.zoomLayout.zooms[index] || 1)
+                // Resting slot. Far icons do not read the cursor, so they cannot drift.
+                readonly property real rowShift: taskListRoot.pinnedCenter
+                readonly property real slotStart: rowShift + index * taskListRoot.cellSize + (taskListRoot.zoomLayout.shifts[index] || 0)
+                readonly property real slotLength: taskListRoot.cellSize
 
                 x: vertical ? (taskListRoot.width - width) / 2 : slotStart
                 y: vertical ? slotStart : (taskListRoot.height - height) / 2
@@ -611,7 +702,7 @@ Item {
                 maxParabolicRise: taskListRoot.maxParabolicRise
 
                 displayZoom: taskListRoot.zoomLayout.zooms[index] || 1.0
-                displayRise: taskListRoot.targetRiseAt(index) * taskListRoot.zoomStrength
+                displayRise: taskListRoot.zoomLayout.rises[index] || 0
 
                 onHoverChanged: function(isHovered) {
                     if (isHovered) {
@@ -625,16 +716,20 @@ Item {
                 }
 
                 onMouseMoved: function(localX, localY) {
-                    var position = taskDelegate.mapToItem(taskListRoot, localX, localY);
-                    taskListRoot.updateCursor(vertical ? position.y : position.x);
-
-                    // Handle drag reordering
-                    if (isDragging && taskListRoot.dragInProgress) {
-                        var targetIdx = Math.max(0, Math.min(taskListRoot.restIndexAtCursor(), taskRepeater.count - 1));
-                        if (targetIdx !== taskListRoot.dragSourceIndex) {
-                            taskListRoot.model.move(taskListRoot.dragSourceIndex, targetIdx);
-                            taskListRoot.dragSourceIndex = targetIdx;
-                        }
+                    // Hover zoom is tracked by the stable area below. This
+                    // delegate moves with the magnification, so feeding its
+                    // local point back into the cursor makes the row shake.
+                    if (!(isDragging && taskListRoot.dragInProgress)) {
+                        return;
+                    }
+                    var screen = taskDelegate.mapToGlobal(localX, localY);
+                    if (screen) {
+                        taskListRoot.notePointer(vertical ? screen.y : screen.x);
+                    }
+                    var targetIdx = Math.max(0, Math.min(taskListRoot.restIndexAtCursor(), taskRepeater.count - 1));
+                    if (targetIdx !== taskListRoot.dragSourceIndex) {
+                        taskListRoot.model.move(taskListRoot.dragSourceIndex, targetIdx);
+                        taskListRoot.dragSourceIndex = targetIdx;
                     }
                 }
 
@@ -706,8 +801,12 @@ Item {
             onPositionChanged: function(mouse) {
                 taskListRoot.mouseMovedRecently = true;
                 activityTimer.restart();
+                leaveTimer.stop();
                 taskListRoot.mouseInArea = true;
-                taskListRoot.updateCursor(vertical ? mouse.y : mouse.x);
+                var screen = mapToGlobal(mouse.x, mouse.y);
+                if (screen) {
+                    taskListRoot.notePointer(vertical ? screen.y : screen.x);
+                }
 
                 var hoveredRestIndex = taskListRoot.restIndexAtCursor();
                 var isOverTask = hoveredRestIndex >= 0 && hoveredRestIndex < taskRepeater.count;
@@ -716,11 +815,7 @@ Item {
                 }
             }
 
-            onExited: {
-                activityTimer.stop();
-                confirmTimer.stop();
-                resetHoverState();
-            }
+            onExited: leaveTimer.restart()
         }
     }
 }

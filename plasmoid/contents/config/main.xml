@@ -88,6 +88,10 @@
       <label>The zoom factor for neighboring icons (1.0-1.24 range).</label>
       <default>1.1066666666666667</default>
     </entry>
+    <entry name="growingDock" type="Bool">
+      <label>Whether magnified icons push their neighbours apart. Off, icons zoom in place.</label>
+      <default>true</default>
+    </entry>
     <entry name="growOnMagnifiedSide" type="Bool">
       <label>Whether the dock grows only on the side whose icons are magnified, keeping the hovered icon in place, instead of growing evenly from the center.</label>
       <default>true</default>

@@ -4,6 +4,18 @@ macOS-like icon dock for Plasma 6: zoom on hover, parabolic rise, pin launchers.
 
 https://store.kde.org/p/2352806/
 
+## 1.5.0
+
+- Hover magnification follows the pointer directly. Only the icon under
+  the cursor and its two neighbours change; the rest of the row stays put.
+- Those neighbours can nudge aside. Turn this off under Appearance,
+  Dock growth, to zoom in place as in 1.4.1. The panel keeps its length.
+- Animation duration is how fast the effect appears and disappears.
+  Tracking the pointer does not wait on it.
+- The running-window and group dots track the icon center.
+- Optional `dockregion` plugin masks the panel to the dock shape when
+  "Keep the panel background and shadow" is off. See Building.
+
 ## 1.4.1
 
 - Magic Lamp follows the painted icon, including on a scaled screen.
@@ -44,3 +56,8 @@ installs the plasmoid.
     cmake --build dockregion/build
     sudo cmake --install dockregion/build
     systemctl --user restart plasma-plasmashell
+
+## Contributors
+
+- [PKMNPlatin](https://github.com/PKMNPlatin) — growing dock and the optional
+  `dockregion` plugin.

@@ -244,6 +244,7 @@ PlasmoidItem {
             showAudioIndicator: root.showAudioIndicator
             allowVolumeControl: root.allowVolumeControl
             zoomNeighbors: root.zoomNeighbors
+            growingDock: Plasmoid.configuration.growingDock
             growOnMagnifiedSide: Plasmoid.configuration.growOnMagnifiedSide
             neighborZoomFactor: root.neighborZoomFactor
             iconSpacing: Plasmoid.configuration.iconSpacing
