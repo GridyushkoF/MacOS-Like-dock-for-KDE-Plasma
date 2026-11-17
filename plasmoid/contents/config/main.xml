@@ -88,6 +88,10 @@
       <label>The zoom factor for neighboring icons (1.0-1.24 range).</label>
       <default>1.1066666666666667</default>
     </entry>
+    <entry name="growOnMagnifiedSide" type="Bool">
+      <label>Whether the dock grows only on the side whose icons are magnified, keeping the hovered icon in place, instead of growing evenly from the center.</label>
+      <default>true</default>
+    </entry>
     <entry name="parabolicEnabled" type="Bool">
       <label>Whether to enable parabolic dock effect (icons rise up on hover like macOS).</label>
       <default>true</default>
@@ -95,6 +99,11 @@
     <entry name="maxParabolicRise" type="Int">
       <label>Maximum rise height in pixels for parabolic effect.</label>
       <default>18</default>
+    </entry>
+
+    <entry name="keepPanelBackground" type="Bool">
+      <label>Whether to keep Plasma's panel background and shadow while the dock masks its own region, instead of leaving it to a compositor effect.</label>
+      <default>true</default>
     </entry>
 
     <!-- Anti-clip Setting -->
